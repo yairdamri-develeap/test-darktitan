@@ -1,4 +1,7 @@
 import json
+import re
+import shutil
+import subprocess
 import threading
 import unittest
 import urllib.error
@@ -135,6 +138,55 @@ class RoutingTests(ServerTestCase):
         self.assertEqual(self.request("/nope")[0], 404)
         self.assertEqual(self.request("/calculate")[0], 404)
         self.assertEqual(self.request("/other", "{}", "POST")[0], 404)
+
+
+# Drives the embedded page script in node with a stubbed DOM; fetch goes to the real test server.
+NODE_DRIVER = """
+const [base, script, keys] = process.argv.slice(1);
+const display = {textContent: "0"};
+let onClick;
+const grid = {addEventListener: (_, handler) => { onClick = handler; }};
+global.document = {getElementById: (id) => (id === "display" ? display : grid)};
+const realFetch = fetch;
+global.fetch = (path, opts) => realFetch(base + path, opts);
+(0, eval)(script);
+const seen = [];
+(async () => {
+  for (const key of JSON.parse(keys)) {
+    let el = {dataset: {digit: key}};
+    if (key === "C") el = {dataset: {}, id: "clear"};
+    else if (key === "=") el = {dataset: {}, id: "equals"};
+    else if ("+-*/".includes(key)) el = {dataset: {op: key}};
+    onClick({target: el});
+    await new Promise((resolve) => setTimeout(resolve, key === "=" ? 100 : 0));
+    seen.push(display.textContent);
+  }
+  console.log(JSON.stringify(seen));
+})();
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class FrontendTests(ServerTestCase):
+    def press(self, keys):
+        _, body = self.request("/")
+        script = re.search(r"<script>(.*?)</script>", body.decode(), re.S).group(1)
+        out = subprocess.run(
+            ["node", "-e", NODE_DRIVER, self.base, script, json.dumps(keys)],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        return json.loads(out.stdout)
+
+    def test_clicks_update_display(self):
+        self.assertEqual(self.press(["1", "2", "+", "3", ".", "5", "C"]),
+                         ["1", "12", "12 +", "12 + 3", "12 + 3.", "12 + 3.5", "0"])
+
+    def test_add_shows_result(self):
+        self.assertEqual(self.press(["3", "+", "4", "="])[-1], "7")
+
+    def test_divide_by_zero_shows_error_and_server_survives(self):
+        self.assertIn("division by zero", self.press(["5", "/", "0", "="])[-1])
+        self.assertEqual(self.press(["1", "+", "1", "="])[-1], "2")
 
 
 if __name__ == "__main__":
