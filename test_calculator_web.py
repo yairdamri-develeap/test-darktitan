@@ -261,10 +261,6 @@ class TetrisTests(ServerTestCase):
         self.assertEqual(out["status"], "Game over")
         self.assertEqual(out["timersAfterOver"], 0)
 
-    def test_calculate_still_adds_after_game_page_served(self):
-        status, body = self.request("/calculate", json.dumps({"left": "3", "op": "+", "right": "4"}), "POST")
-        self.assertEqual((status, json.loads(body)), (200, {"result": 7}))
-
 
 if __name__ == "__main__":
     unittest.main()

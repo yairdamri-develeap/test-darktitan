@@ -177,6 +177,7 @@ INDEX_HTML = """<!DOCTYPE html>
     return cleared;
   }
 
+  // Exposed so the node-driven tests can exercise the board logic directly.
   globalThis.__tetris = { newBoard: newBoard, collides: collides, clearRows: clearRows, rotate: rotate };
 
   var calc = document.getElementById("calc");
