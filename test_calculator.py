@@ -1,10 +1,13 @@
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import unittest
 
 import calculator
+
+SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calculator.py")
 
 
 def run(*args):
@@ -57,6 +60,9 @@ class ErrorTests(unittest.TestCase):
         self.assert_error(["abc", "+", "2"])
         self.assert_error(["nan", "+", "2"])
 
+    def test_overflow(self):
+        self.assert_error(["1" + "0" * 400, "/", "1"])
+
     def test_unknown_operator(self):
         self.assert_error(["1", "^", "2"])
 
@@ -69,7 +75,7 @@ class ErrorTests(unittest.TestCase):
 
 class SubprocessTests(unittest.TestCase):
     def cli(self, *args):
-        return subprocess.run([sys.executable, "calculator.py", *args], capture_output=True, text=True)
+        return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
 
     def test_cli(self):
         r = self.cli("3", "+", "4")

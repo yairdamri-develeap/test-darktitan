@@ -50,15 +50,21 @@ def main(argv=None):
     if op not in OPERATIONS:
         print(f"Error: unknown operator '{op}'", file=sys.stderr)
         return 2
-    try:
-        a, b = parse_number(left), parse_number(right)
-    except ValueError:
-        print(f"Error: invalid number in '{left}' / '{right}'", file=sys.stderr)
-        return 1
+    operands = []
+    for text in (left, right):
+        try:
+            operands.append(parse_number(text))
+        except ValueError:
+            print(f"Error: invalid number '{text}'", file=sys.stderr)
+            return 1
+    a, b = operands
     try:
         result = OPERATIONS[op](a, b)
     except ZeroDivisionError:
         print("Error: division by zero", file=sys.stderr)
+        return 1
+    except OverflowError:
+        print("Error: result too large", file=sys.stderr)
         return 1
     print(result)
     return 0
