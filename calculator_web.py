@@ -37,6 +37,8 @@ INDEX_HTML = """<!DOCTYPE html>
   [hidden] { display: none !important; }
   #game-btn { width: 100%; margin-top: .4em; background: #5c6bc0; color: #fff; }
   #game-btn:hover { background: #3f51b5; }
+  #flappy-btn { width: 100%; margin-top: .4em; background: #26a69a; color: #fff; }
+  #flappy-btn:hover { background: #00897b; }
   #game { width: 18em; background: #fff; padding: 1em; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-align: center; }
   #board { background: #263238; border-radius: 4px; }
   #game-status { min-height: 1.5em; margin: .5em 0; }
@@ -66,6 +68,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <button class="eq" id="equals">=</button>
   </div>
   <button id="game-btn">Game</button>
+  <button id="flappy-btn">Flappy Bird</button>
 </div>
 <div id="game" hidden>
   <canvas id="board" width="200" height="400"></canvas>
@@ -178,7 +181,8 @@ INDEX_HTML = """<!DOCTYPE html>
   }
 
   // Exposed so the node-driven tests can exercise the board logic directly.
-  globalThis.__tetris = { newBoard: newBoard, collides: collides, clearRows: clearRows, rotate: rotate };
+  // halt is also used by the Flappy Bird script to take over the shared canvas.
+  globalThis.__tetris = { newBoard: newBoard, collides: collides, clearRows: clearRows, rotate: rotate, stop: halt };
 
   var calc = document.getElementById("calc");
   var game = document.getElementById("game");
@@ -238,6 +242,12 @@ INDEX_HTML = """<!DOCTYPE html>
     if (timer !== null) { clearInterval(timer); timer = null; }
   }
 
+  // Stops the timer and ignores keys so a hidden Tetris cannot draw on the shared canvas.
+  function halt() {
+    over = true;
+    stop();
+  }
+
   function start() {
     stop();
     board = newBoard();
@@ -280,6 +290,120 @@ INDEX_HTML = """<!DOCTYPE html>
     calc.hidden = false;
   });
   restartBtn.addEventListener("click", start);
+})();
+</script>
+<script>
+(function () {
+  var W = 200, H = 400;
+  var BIRD_X = 50, SIZE = 16;
+  var GRAVITY = 0.5, FLAP = -7;
+  var PIPE_W = 30, GAP = 110, SPEED = 2, PIPE_EVERY = 110, MARGIN = 40;
+
+  function applyGravity(bird) {
+    bird.vy += GRAVITY;
+    bird.y += bird.vy;
+  }
+
+  function flap(bird) {
+    bird.vy = FLAP;
+  }
+
+  // A pipe is { x, gapY }: it spans x..x+PIPE_W with an opening from gapY to gapY+GAP.
+  function hitsPipe(bird, pipes) {
+    return pipes.some(function (p) {
+      var overlapsX = BIRD_X + SIZE > p.x && BIRD_X < p.x + PIPE_W;
+      return overlapsX && (bird.y < p.gapY || bird.y + SIZE > p.gapY + GAP);
+    });
+  }
+
+  function outOfBounds(bird) {
+    return bird.y < 0 || bird.y + SIZE > H;
+  }
+
+  // Exposed so the node-driven tests can exercise the physics directly.
+  globalThis.__flappybird = {
+    stop: stop, applyGravity: applyGravity, flap: flap, hitsPipe: hitsPipe, outOfBounds: outOfBounds
+  };
+
+  var calc = document.getElementById("calc");
+  var game = document.getElementById("game");
+  var canvas = document.getElementById("board");
+  var status = document.getElementById("game-status");
+  var restartBtn = document.getElementById("restart-btn");
+  var ctx = canvas.getContext("2d");
+  var bird, pipes, timer = null, over = false, active = false;
+
+  function addPipe() {
+    pipes.push({ x: W, gapY: MARGIN + Math.floor(Math.random() * (H - GAP - 2 * MARGIN)) });
+  }
+
+  function draw() {
+    ctx.fillStyle = "#4fc3f7";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#43a047";
+    pipes.forEach(function (p) {
+      ctx.fillRect(p.x, 0, PIPE_W, p.gapY);
+      ctx.fillRect(p.x, p.gapY + GAP, PIPE_W, H - p.gapY - GAP);
+    });
+    ctx.fillStyle = "#ffeb3b";
+    ctx.fillRect(BIRD_X, bird.y, SIZE, SIZE);
+  }
+
+  function finish() {
+    over = true;
+    if (timer !== null) { clearInterval(timer); timer = null; }
+    status.textContent = "Game over - press Space or click to restart";
+  }
+
+  function step() {
+    if (over) { return; }
+    applyGravity(bird);
+    pipes.forEach(function (p) { p.x -= SPEED; });
+    pipes = pipes.filter(function (p) { return p.x + PIPE_W > 0; });
+    if (pipes[pipes.length - 1].x <= W - PIPE_EVERY) { addPipe(); }
+    if (outOfBounds(bird) || hitsPipe(bird, pipes)) { finish(); } else { draw(); }
+  }
+
+  function stop() {
+    active = false;
+    over = true;
+    if (timer !== null) { clearInterval(timer); timer = null; }
+  }
+
+  function start() {
+    stop();
+    bird = { y: H / 2, vy: 0 };
+    pipes = [];
+    addPipe();
+    active = true;
+    over = false;
+    status.textContent = "";
+    restartBtn.hidden = true;
+    draw();
+    timer = setInterval(step, 30);
+  }
+
+  function press() {
+    if (!active) { return; }
+    if (over) { start(); } else { flap(bird); }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (game.hidden || e.key !== " ") { return; }
+    e.preventDefault();
+    press();
+  });
+  canvas.addEventListener("click", press);
+
+  document.getElementById("flappy-btn").addEventListener("click", function () {
+    if (globalThis.__tetris) { globalThis.__tetris.stop(); }
+    calc.hidden = true;
+    game.hidden = false;
+    start();
+  });
+  // Tetris's own handler starts Tetris; this one just stops Flappy Bird.
+  document.getElementById("game-btn").addEventListener("click", stop);
+  document.getElementById("back-btn").addEventListener("click", stop);
 })();
 </script>
 </body>
