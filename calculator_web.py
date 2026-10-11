@@ -10,7 +10,7 @@ import json
 import math
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from calculator import add, subtract, multiply, divide, parse_number, OPERATIONS
+from calculator import add, subtract, multiply, divide, parse_number, OPERATIONS  # noqa: F401
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -58,7 +58,7 @@ class CalculatorHandler(BaseHTTPRequestHandler):
             return
         try:
             data = json.loads(self.rfile.read(length))
-        except (ValueError, UnicodeDecodeError):
+        except ValueError:
             self._error("invalid JSON")
             return
         if not isinstance(data, dict):
