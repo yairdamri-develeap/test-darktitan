@@ -134,7 +134,15 @@ class RoutingTests(ServerTestCase):
         self.assertIn("/calculate", page)
         self.assertNotIn("eval(", page)
 
+    def test_get_root_has_game_toggle(self):
+        page = self.request("/")[1].decode()
+        self.assertRegex(page, r'<button id="game-btn">Game</button>')
+        self.assertRegex(page, r'<button id="back-btn">Back</button>')
+        self.assertIn('<div id="game" hidden>', page)
+        self.assertIn("<canvas", page)
+
     def test_unknown_paths_404(self):
+        self.assertEqual(self.request("/tetris")[0], 404)
         self.assertEqual(self.request("/nope")[0], 404)
         self.assertEqual(self.request("/calculate")[0], 404)
         self.assertEqual(self.request("/other", "{}", "POST")[0], 404)
@@ -193,6 +201,69 @@ class FrontendTests(ServerTestCase):
 
     def test_operator_after_error_is_ignored(self):
         self.assertEqual(self.press(["5", "/", "0", "=", "+", "7"])[-2:], ["0", "7"])
+
+
+# Drives the second embedded script (Tetris) in node with a stubbed DOM and fake timers.
+TETRIS_DRIVER = """
+const script = process.argv[1];
+const els = {}, listeners = {};
+const el = (id) => els[id] || (els[id] = {
+  id, hidden: id === "game" || id === "restart-btn", textContent: "",
+  addEventListener: (type, fn) => { listeners[id + ":" + type] = fn; },
+  getContext: () => ({fillRect() {}, set fillStyle(_) {}}),
+});
+global.document = {getElementById: el, addEventListener() {}};
+let timers = 0, tick;
+global.setInterval = (fn) => { timers++; tick = fn; return 1; };
+global.clearInterval = () => { timers--; };
+(0, eval)(script);
+const out = {};
+listeners["game-btn:click"]();
+out.inGame = [els.calc.hidden, els.game.hidden, timers];
+for (let i = 0; i < 3; i++) tick();
+listeners["back-btn:click"]();
+out.back = [els.calc.hidden, els.game.hidden, timers];
+const T = globalThis.__tetris;
+const board = T.newBoard();
+board[19].fill(1);
+board[18][0] = 2;
+out.cleared = T.clearRows(board);
+out.shifted = [board[19][0], board[19][1]];
+listeners["game-btn:click"]();
+for (let i = 0; i < 400 && !els["game-status"].textContent; i++) tick();
+out.status = els["game-status"].textContent;
+out.timersAfterOver = timers;
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TetrisTests(ServerTestCase):
+    def run_game(self):
+        _, body = self.request("/")
+        script = re.findall(r"<script>(.*?)</script>", body.decode(), re.S)[1]
+        out = subprocess.run(["node", "-e", TETRIS_DRIVER, script],
+                             capture_output=True, text=True, check=True, timeout=30)
+        return json.loads(out.stdout)
+
+    def test_toggle_between_calculator_and_game(self):
+        out = self.run_game()
+        self.assertEqual(out["inGame"], [True, False, 1])  # calc hidden, game shown, piece timer running
+        self.assertEqual(out["back"], [False, True, 0])  # calc restored, timer stopped
+
+    def test_full_row_clears_and_rows_above_shift_down(self):
+        out = self.run_game()
+        self.assertEqual(out["cleared"], 1)
+        self.assertEqual(out["shifted"], [2, 0])
+
+    def test_game_over_stops_the_game(self):
+        out = self.run_game()
+        self.assertEqual(out["status"], "Game over")
+        self.assertEqual(out["timersAfterOver"], 0)
+
+    def test_calculate_still_adds_after_game_page_served(self):
+        status, body = self.request("/calculate", json.dumps({"left": "3", "op": "+", "right": "4"}), "POST")
+        self.assertEqual((status, json.loads(body)), (200, {"result": 7}))
 
 
 if __name__ == "__main__":
