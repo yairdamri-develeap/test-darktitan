@@ -141,6 +141,10 @@ class RoutingTests(ServerTestCase):
         self.assertIn('<div id="game" hidden>', page)
         self.assertIn("<canvas", page)
 
+    def test_get_root_has_flappy_button(self):
+        page = self.request("/")[1].decode()
+        self.assertRegex(page, r'<button id="flappy-btn">Flappy Bird</button>')
+
     def test_unknown_paths_404(self):
         self.assertEqual(self.request("/tetris")[0], 404)
         self.assertEqual(self.request("/nope")[0], 404)
@@ -260,6 +264,106 @@ class TetrisTests(ServerTestCase):
         out = self.run_game()
         self.assertEqual(out["status"], "Game over")
         self.assertEqual(out["timersAfterOver"], 0)
+
+
+# Drives the third embedded script (Flappy Bird) in node with a stubbed DOM and fake timers.
+# The Tetris script is not loaded; a stub __tetris records whether Flappy Bird stopped it.
+FLAPPY_DRIVER = """
+const script = process.argv[1];
+const els = {}, listeners = {};
+const el = (id) => els[id] || (els[id] = {
+  id, hidden: id === "game" || id === "restart-btn", textContent: "",
+  addEventListener: (type, fn) => { (listeners[id + ":" + type] ||= []).push(fn); },
+  getContext: () => ({fillRect() {}, set fillStyle(_) {}}),
+});
+const fire = (key, ...args) => (listeners[key] || []).forEach((fn) => fn(...args));
+global.document = {getElementById: el, addEventListener: (type, fn) => {
+  (listeners["document:" + type] ||= []).push(fn);
+}};
+let timers = 0, tick;
+global.setInterval = (fn) => { timers++; tick = fn; return 1; };
+global.clearInterval = () => { timers--; };
+let tetrisStops = 0;
+globalThis.__tetris = {stop() { tetrisStops++; }};
+(0, eval)(script);
+const F = globalThis.__flappybird;
+const out = {};
+fire("flappy-btn:click");
+out.inGame = [els.calc.hidden, els.game.hidden, timers];
+out.tetrisStops = tetrisStops;
+// the bird falls under gravity
+const bird = {y: 100, vy: 0};
+F.applyGravity(bird);
+const fell = bird.y > 100;
+F.applyGravity(bird);
+out.falling = fell && bird.vy > 0 && bird.y > 101;
+// flap via spacebar and via canvas click
+F.flap(bird);
+out.flapVy = bird.vy < 0;
+const key = {key: " ", preventDefault() { this.prevented = true; }};
+fire("document:keydown", key);
+out.spacePrevented = !!key.prevented;
+fire("board:click");
+out.helpers = [
+  F.outOfBounds({y: -1}), F.outOfBounds({y: 390}), F.outOfBounds({y: 200}),
+  F.hitsPipe({y: 200}, [{x: 50, gapY: 10}]),
+  F.hitsPipe({y: 20}, [{x: 50, gapY: 10}]),
+  F.hitsPipe({y: 200}, [{x: 150, gapY: 10}]),
+];
+// no flapping: the bird hits the bottom (or a pipe) and the game ends
+for (let i = 0; i < 400 && !els["game-status"].textContent; i++) tick();
+out.status = els["game-status"].textContent;
+out.timersAfterOver = timers;
+// restart with spacebar
+fire("document:keydown", key);
+out.restarted = [els["game-status"].textContent, timers];
+// Tetris launch stops Flappy Bird
+fire("game-btn:click");
+out.timersAfterTetris = timers;
+fire("document:keydown", key);
+out.inactiveIgnoresSpace = timers;
+// back stops it too
+fire("flappy-btn:click");
+fire("back-btn:click");
+out.timersAfterBack = timers;
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class FlappyTests(ServerTestCase):
+    def run_game(self):
+        _, body = self.request("/")
+        script = re.findall(r"<script>(.*?)</script>", body.decode(), re.S)[2]
+        out = subprocess.run(["node", "-e", FLAPPY_DRIVER, script],
+                             capture_output=True, text=True, check=True, timeout=30)
+        return json.loads(out.stdout)
+
+    def test_toggle_stops_tetris_and_starts_game(self):
+        out = self.run_game()
+        self.assertEqual(out["inGame"], [True, False, 1])  # calc hidden, game shown, timer running
+        self.assertEqual(out["tetrisStops"], 1)
+        self.assertEqual(out["timersAfterBack"], 0)
+
+    def test_gravity_and_flap(self):
+        out = self.run_game()
+        self.assertTrue(out["falling"])
+        self.assertTrue(out["flapVy"])
+        self.assertTrue(out["spacePrevented"])
+
+    def test_collision_helpers(self):
+        self.assertEqual(self.run_game()["helpers"], [True, True, False, True, False, False])
+
+    def test_game_over_stops_the_timer_and_restart_works(self):
+        out = self.run_game()
+        self.assertIn("Game over", out["status"])
+        self.assertEqual(out["timersAfterOver"], 0)
+        self.assertEqual(out["restarted"], ["", 1])
+
+    def test_launching_tetris_stops_flappy_bird(self):
+        out = self.run_game()
+        self.assertEqual(out["timersAfterTetris"], 0)
+        self.assertEqual(out["inactiveIgnoresSpace"], 0)
 
 
 if __name__ == "__main__":
