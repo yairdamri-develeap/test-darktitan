@@ -2,7 +2,7 @@
 
 Usage: python calculator_web.py
 
-GET /           placeholder page
+GET /           calculator page (embedded HTML/JS)
 POST /calculate JSON {"left": ..., "op": ..., "right": ...}
                 -> {"result": ...} or {"error": ...} (HTTP 400)
 """
@@ -16,10 +16,101 @@ HOST = "127.0.0.1"
 PORT = 8000
 MAX_BODY = 4096
 
-PLACEHOLDER_HTML = """<!DOCTYPE html>
+INDEX_HTML = """<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Calculator</title></head>
-<body><h1>Calculator</h1><p>The calculator interface is coming soon.</p></body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculator</title>
+<style>
+  body { font-family: sans-serif; background: #eceff1; display: flex; justify-content: center; padding-top: 3em; }
+  #calc { width: 18em; background: #fff; padding: 1em; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  #display { min-height: 1.5em; margin-bottom: .75em; padding: .5em; background: #263238; color: #fff;
+             font-size: 1.5em; text-align: right; overflow-wrap: anywhere; border-radius: 4px; }
+  #grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4em; }
+  button { font-size: 1.25em; padding: .6em 0; border: 0; border-radius: 4px; background: #cfd8dc; cursor: pointer; }
+  button:hover { background: #b0bec5; }
+  button.op { background: #ff9800; }
+  button.op:hover { background: #fb8c00; }
+  button.eq { background: #43a047; color: #fff; grid-column: 1 / -1; }
+  button.clear { background: #e53935; color: #fff; }
+</style>
+</head>
+<body>
+<div id="calc">
+  <div id="display">0</div>
+  <div id="grid">
+    <button data-digit="7">7</button>
+    <button data-digit="8">8</button>
+    <button data-digit="9">9</button>
+    <button class="op" data-op="/">/</button>
+    <button data-digit="4">4</button>
+    <button data-digit="5">5</button>
+    <button data-digit="6">6</button>
+    <button class="op" data-op="*">*</button>
+    <button data-digit="1">1</button>
+    <button data-digit="2">2</button>
+    <button data-digit="3">3</button>
+    <button class="op" data-op="-">-</button>
+    <button data-digit="0">0</button>
+    <button data-digit=".">.</button>
+    <button class="clear" id="clear">C</button>
+    <button class="op" data-op="+">+</button>
+    <button class="eq" id="equals">=</button>
+  </div>
+</div>
+<script>
+(function () {
+  var left = "", op = "", right = "", shown = null;
+  var display = document.getElementById("display");
+
+  function render() {
+    if (shown !== null) { display.textContent = shown; return; }
+    var text = [left, op, right].filter(Boolean).join(" ");
+    display.textContent = text || "0";
+  }
+
+  function reset() { left = ""; op = ""; right = ""; shown = null; }
+
+  function digit(d) {
+    if (shown !== null) { reset(); }
+    var current = op ? right : left;
+    if (d === "." && current.indexOf(".") !== -1) { return; }
+    if (op) { right += d; } else { left += d; }
+  }
+
+  function operator(o) {
+    if (shown !== null) { left = shown; shown = null; }
+    if (!left) { return; }
+    if (op && right) { return; }
+    op = o;
+  }
+
+  function equals() {
+    if (!left || !op || !right) { return; }
+    var body = JSON.stringify({ left: left, op: op, right: right });
+    fetch("/calculate", { method: "POST", headers: { "Content-Type": "application/json" }, body: body })
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        reset();
+        shown = data.result !== undefined ? String(data.result) : "Error: " + data.error;
+        render();
+      })
+      .catch(function () { reset(); shown = "Error: network error"; render(); });
+  }
+
+  document.getElementById("grid").addEventListener("click", function (event) {
+    var el = event.target;
+    if (el.dataset.digit !== undefined) { digit(el.dataset.digit); }
+    else if (el.dataset.op !== undefined) { operator(el.dataset.op); }
+    else if (el.id === "clear") { reset(); }
+    else if (el.id === "equals") { equals(); return; }
+    else { return; }
+    render();
+  });
+})();
+</script>
+</body>
 </html>
 """
 
@@ -40,7 +131,7 @@ class CalculatorHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
-            self._send(200, PLACEHOLDER_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            self._send(200, INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
         else:
             self._error("not found", 404)
 

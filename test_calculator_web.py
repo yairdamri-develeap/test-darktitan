@@ -115,6 +115,22 @@ class RoutingTests(ServerTestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"<html", body)
 
+    def test_get_root_has_calculator_controls(self):
+        status, body = self.request("/")
+        page = body.decode()
+        self.assertEqual(status, 200)
+        self.assertIn('id="display"', page)
+        for digit in "0123456789.":
+            with self.subTest(digit=digit):
+                self.assertIn(f'data-digit="{digit}"', page)
+        for op in "+-*/":
+            with self.subTest(op=op):
+                self.assertIn(f'data-op="{op}"', page)
+        self.assertIn('id="clear"', page)
+        self.assertIn('id="equals"', page)
+        self.assertIn("/calculate", page)
+        self.assertNotIn("eval(", page)
+
     def test_unknown_paths_404(self):
         self.assertEqual(self.request("/nope")[0], 404)
         self.assertEqual(self.request("/calculate")[0], 404)
