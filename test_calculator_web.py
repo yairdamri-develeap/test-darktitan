@@ -188,6 +188,12 @@ class FrontendTests(ServerTestCase):
         self.assertIn("division by zero", self.press(["5", "/", "0", "="])[-1])
         self.assertEqual(self.press(["1", "+", "1", "="])[-1], "2")
 
+    def test_operator_continues_from_result(self):
+        self.assertEqual(self.press(["3", "+", "4", "=", "*", "2", "="])[-3:], ["7 *", "7 * 2", "14"])
+
+    def test_operator_after_error_is_ignored(self):
+        self.assertEqual(self.press(["5", "/", "0", "=", "+", "7"])[-2:], ["0", "7"])
+
 
 if __name__ == "__main__":
     unittest.main()

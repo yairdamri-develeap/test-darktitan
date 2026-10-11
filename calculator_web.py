@@ -80,7 +80,7 @@ INDEX_HTML = """<!DOCTYPE html>
   }
 
   function operator(o) {
-    if (shown !== null) { left = shown; shown = null; }
+    shown = null;
     if (!left) { return; }
     if (op && right) { return; }
     op = o;
@@ -93,7 +93,8 @@ INDEX_HTML = """<!DOCTYPE html>
       .then(function (resp) { return resp.json(); })
       .then(function (data) {
         reset();
-        shown = data.result !== undefined ? String(data.result) : "Error: " + data.error;
+        if (data.result !== undefined) { left = String(data.result); shown = left; }
+        else { shown = "Error: " + data.error; }
         render();
       })
       .catch(function () { reset(); shown = "Error: network error"; render(); });
